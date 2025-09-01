@@ -1,22 +1,23 @@
 const mqtt = require("mqtt");
-
 const express = require("express");
-
 const http = require("http");
-
 const { Server } = require("socket.io");
+const path = require("path");
 
 const app = express();
-
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Hardcoded for easy set up
+// Serve static index.html at /
+app.use(express.static(path.join(__dirname, "public")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
+// MQTT setup
 const host = "broker.emqx.io";
 const port = "1883";
 const clientId = `mqtt_${Math.random().toString(16).slice(3)}`;
-
 const connectUrl = `mqtt://${host}:${port}`;
 
 const client = mqtt.connect(connectUrl, {
@@ -28,8 +29,6 @@ const client = mqtt.connect(connectUrl, {
   reconnectPeriod: 1000,
 });
 
-// on connect, on message, on error,
-
 const topics = [
   "hospital/bed01/weights",
   "hospital/bed02/weights",
@@ -39,23 +38,33 @@ const topics = [
 ];
 
 client.on("connect", () => {
-  console.log("Connected to MQTT broker");
-
-  topics.forEach((topic) => {
-    client.subscribe(topic, () => {
-      console.log(`Subscribed to ${topic}`);
-    });
-  });
+  console.log("✅ Connected to MQTT broker");
+  topics.forEach((topic) => client.subscribe(topic));
 });
 
 client.on("error", (err) => {
-  console.error("MQTT connection error:", err);
+  console.error("❌ MQTT connection error:", err.message);
 });
 
 client.on("message", (topic, message) => {
-  console.log("Received message:", topic, message.toString());
+  const payloadStr = message.toString();
+  let payload;
+  try {
+    payload = JSON.parse(payloadStr);
+  } catch {
+    payload = null;
+  }
+
+  // Emit to dashboard
+  io.emit("mqtt_message", { topic, message: payloadStr });
+
+  // Run alert checks
+  if (payload && payload.weights) {
+    checkAlerts(payload, topic);
+  }
 });
 
+// ---- Patient simulation ----
 const patients = [
   {
     id: "P001",
@@ -87,55 +96,84 @@ const patients = [
   },
 ];
 
-function getRandomPatient() {
-  return patients[Math.floor(Math.random() * patients.length)];
-}
-
 function getRandomWeights() {
-  const headLeft = (15 + Math.random() * 10).toFixed(1);
-  const headRight = (15 + Math.random() * 10).toFixed(1);
-  const footLeft = (15 + Math.random() * 10).toFixed(1);
-  const footRight = (15 + Math.random() * 10).toFixed(1);
-
   return {
-    head_left: parseFloat(headLeft),
-    head_right: parseFloat(headRight),
-    foot_left: parseFloat(footLeft),
-    foot_right: parseFloat(footRight),
+    head_left: +(15 + Math.random() * 10).toFixed(1),
+    head_right: +(15 + Math.random() * 10).toFixed(1),
+    foot_left: +(15 + Math.random() * 10).toFixed(1),
+    foot_right: +(15 + Math.random() * 10).toFixed(1),
   };
 }
 
 setInterval(() => {
   patients.forEach((patient, i) => {
     const topic = topics[i];
-
     const payload = {
       bedId: patient.bedId,
-      patient: {
-        id: patient.id,
-        name: patient.name,
-        age: patient.age,
-        location: patient.location,
-      },
-      weights: {
-        head_left: getRandomWeights().head_left,
-        head_right: getRandomWeights().head_right,
-        foot_left: getRandomWeights().foot_left,
-        foot_right: getRandomWeights().foot_right,
-      },
+      patient,
+      weights: getRandomWeights(),
       timestamp: new Date().toISOString(),
     };
-
-    client.publish(topic, JSON.stringify(payload), { qos: 1 }, (err) => {
-      if (err) {
-        console.error("Failed to publish message:", err);
-      } else {
-        console.log("Published to", topic, ":", payload);
-      }
-    });
+    client.publish(topic, JSON.stringify(payload), { qos: 1 });
   });
-}, 10000); // Publish every 10 seconds
+}, 10000);
 
+// ---- Alert Logic ----
+function checkAlerts(payload, topic) {
+  const { patient, weights, timestamp } = payload;
+  const total =
+    weights.head_left +
+    weights.head_right +
+    weights.foot_left +
+    weights.foot_right;
+
+  // Thresholds
+  const minBedWeight = 20; // kg → likely empty bed
+  const maxSuddenChange = 15; // kg drop/gain → sudden movement
+  const imbalanceThreshold = 0.7; // >70% weight on one side
+
+  // Check 1: Patient left bed
+  if (total < minBedWeight) {
+    emitAlert("Patient left bed", patient, topic, timestamp);
+    return;
+  }
+
+  // Check 2: Imbalance
+  const maxQuadrant = Math.max(
+    weights.head_left,
+    weights.head_right,
+    weights.foot_left,
+    weights.foot_right
+  );
+  if (maxQuadrant / total > imbalanceThreshold) {
+    emitAlert("Dangerous weight imbalance", patient, topic, timestamp);
+    return;
+  }
+
+  // (Optional: track previous weight for sudden change detection)
+  if (!patient.lastWeight) {
+    patient.lastWeight = total;
+  } else {
+    const diff = Math.abs(total - patient.lastWeight);
+    if (diff > maxSuddenChange) {
+      emitAlert("Sudden bed weight change", patient, topic, timestamp);
+    }
+    patient.lastWeight = total;
+  }
+}
+
+function emitAlert(reason, patient, topic, timestamp) {
+  const alert = {
+    reason,
+    patient,
+    topic,
+    ts: timestamp || new Date().toISOString(),
+  };
+  io.emit("nurse_alert", alert);
+  console.log("🚨 Alert:", reason, "for", patient.name);
+}
+
+// ---- Start server ----
 server.listen(3000, () => {
-  console.log("Server is listening on port 3000");
+  console.log("🚀 Server running at http://localhost:3000");
 });

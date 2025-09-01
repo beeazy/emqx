@@ -1,142 +1,68 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>MQTT Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f6fa;
-      margin: 0;
-      padding: 0;
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+
+  const statusEl = document.getElementById("status");
+  const topicEl = document.getElementById("topicName");
+  const messagesEl = document.getElementById("messages");
+  const alertsEl = document.getElementById("alerts");
+
+  socket.on("connect", () => {
+    statusEl.innerText = "Connected";
+    statusEl.className = "status connected";
+  });
+
+  socket.on("disconnect", () => {
+    statusEl.innerText = "Disconnected";
+    statusEl.className = "status disconnected";
+  });
+
+  socket.on("mqtt_message", (msg) => {
+    let payload;
+    try {
+      payload = JSON.parse(msg.message);
+    } catch (e) {
+      payload = null;
     }
 
-    header {
-      background: #2f3640;
-      color: white;
-      padding: 15px;
-      text-align: center;
-      font-size: 20px;
+    if (topicEl.textContent === "–") {
+      topicEl.textContent = msg.topic;
     }
 
-    .container {
-      max-width: 900px;
-      margin: 30px auto;
-      padding: 20px;
-    }
+    const div = document.createElement("div");
+    div.className = "message";
 
-    .card {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-
-    .status {
-      font-weight: bold;
-    }
-    .status.connected { color: green; }
-    .status.disconnected { color: red; }
-
-    .message-list {
-      max-height: 400px;
-      overflow-y: auto;
-    }
-
-    .message {
-      background: #f1f2f6;
-      padding: 12px;
-      margin-bottom: 10px;
-      border-radius: 8px;
-    }
-
-    .topic {
-      font-size: 14px;
-      color: #718093;
-    }
-
-    .payload {
-      font-size: 16px;
-      font-weight: bold;
-      color: #2f3640;
-    }
-
-    .time {
-      font-size: 12px;
-      color: #888;
-      margin-top: 5px;
-    }
-
-    .alert {
-      color: #b00020;
-      font-weight: bold;
-      margin-top: 5px;
-    }
-  </style>
-</head>
-<body>
-  <header>MQTT Dashboard</header>
-
-  <div class="container">
-    <div class="card">
-      <p>Broker Connection Status: <span id="status" class="status disconnected">Disconnected</span></p>
-      <p>Subscribed Topic: <b id="topicName">–</b></p>
-    </div>
-
-    <div class="card">
-      <h3>Received Messages</h3>
-      <div class="message-list" id="messages"></div>
-    </div>
-
-    <div class="card">
-      <h3>Alerts</h3>
-      <div id="alerts"></div>
-    </div>
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
-
-    const statusEl = document.getElementById("status");
-    const topicEl = document.getElementById("topicName");
-    const messagesEl = document.getElementById("messages");
-    const alertsEl = document.getElementById("alerts");
-
-    socket.on("connect", () => {
-      statusEl.innerText = "Connected";
-      statusEl.className = "status connected";
-    });
-
-    socket.on("disconnect", () => {
-      statusEl.innerText = "Disconnected";
-      statusEl.className = "status disconnected";
-    });
-
-    socket.on("mqtt_message", (msg) => {
-      // Set topic name the first time
-      if (topicEl.textContent === "–") {
-        topicEl.textContent = msg.topic;
-      }
-
-      const div = document.createElement("div");
-      div.className = "message";
+    if (payload && payload.patient) {
       div.innerHTML = `
         <div class="topic">Topic: ${msg.topic}</div>
-        <div class="payload">${JSON.stringify(msg.payload || msg)}</div>
-        <div class="time">${new Date(msg.ts).toLocaleTimeString()}</div>
+        <div class="payload">
+          <b>Patient:</b> ${payload.patient.name} (ID: ${payload.patient.id}, Age: ${payload.patient.age})<br/>
+          <b>Bed:</b> ${payload.bedId} — ${payload.patient.location}<br/>
+          <b>Weights:</b>
+          <ul>
+            <li>Head Left: ${payload.weights.head_left} kg</li>
+            <li>Head Right: ${payload.weights.head_right} kg</li>
+            <li>Foot Left: ${payload.weights.foot_left} kg</li>
+            <li>Foot Right: ${payload.weights.foot_right} kg</li>
+          </ul>
+          <div class="time">Timestamp: ${new Date(payload.timestamp).toLocaleString()}</div>
+        </div>
       `;
-      messagesEl.prepend(div);
-    });
+    } else {
+      div.innerHTML = `
+        <div class="topic">Topic: ${msg.topic}</div>
+        <div class="payload">${msg.message}</div>
+        <div class="time">${new Date().toLocaleTimeString()}</div>
+      `;
+    }
 
-    socket.on("high_temperature_alert", (data) => {
-      const p = document.createElement("p");
-      p.className = "alert";
-      p.textContent = `⚠ High temperature: ${data.value} @ ${new Date(data.ts).toLocaleTimeString()}`;
-      alertsEl.appendChild(p);
-    });
-  </script>
-</body>
-</html>
+    messagesEl.prepend(div);
+  });
+
+  socket.on("nurse_alert", (alert) => {
+    const p = document.createElement("p");
+    p.className = "alert";
+    p.textContent = `🚨 ${alert.reason} for ${alert.patient.name} (Bed ${alert.patient.bedId}) @ ${new Date(alert.ts).toLocaleTimeString()}`;
+    alertsEl.prepend(p);
+  });
+</script>
