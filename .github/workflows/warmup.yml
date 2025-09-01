@@ -1,0 +1,13 @@
+name: Warmup Service
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"
+
+jobs:
+  run-updater:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API
+        run: |
+          curl -fsS "https://emqx-znfs.onrender.com" > /dev/null

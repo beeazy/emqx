@@ -134,7 +134,7 @@ setInterval(() => {
       }
     });
   });
-}, 5000);
+}, 10000); // Publish every 10 seconds
 
 server.listen(3000, () => {
   console.log("Server is listening on port 3000");
