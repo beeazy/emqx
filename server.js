@@ -11,7 +11,8 @@ const io = new Server(server);
 // Serve static index.html at /
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  // res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.send("Welcome to the MQTT Dashboard");
 });
 
 // MQTT setup
