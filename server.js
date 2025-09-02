@@ -116,7 +116,7 @@ setInterval(() => {
     };
     client.publish(topic, JSON.stringify(payload), { qos: 1 });
   });
-}, 10000);
+}, 15000);
 
 // ---- Alert Logic ----
 function checkAlerts(payload, topic) {
